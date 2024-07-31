@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quad Tree para Imagen en Escala de Grises</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        canvas {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid black;
+        }
+        input[type="file"] {
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Quad Tree para Imagen en Escala de Grises</h1>
+    <input type="file" id="fileInput">
+    <canvas id="imageCanvas" width="512" height="512"></canvas>
+    <script>
+        // Función para convertir una imagen en escala de grises
+        function imagenAGrises(imagen) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = imagen.width;
+            canvas.height = imagen.height;
+            ctx.drawImage(imagen, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const gris = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                data[i] = gris; // rojo
+                data[i + 1] = gris; // verde
+                data[i + 2] = gris; // azul
+            }
+            ctx.putImageData(imageData, 0, 0);
+            return canvas;
+        }
+
+        // Clase Punto para manejar coordenadas (x, y)
+        class Punto {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+            }
+        }
+
+        // Clase Rectangulo para representar regiones en el Quad Tree
+        class Rectangulo {
+            constructor(x, y, w, h) {
+                this.x = x;
+                this.y = y;
+                this.w = w;
+                this.h = h;
+            }
+
+            // Verifica si un punto está dentro de este rectángulo
+            contiene(punto) {
+                return (
+                    punto.x >= this.x &&
+                    punto.x < this.x + this.w &&
+                    punto.y >= this.y &&
+                    punto.y < this.y + this.h
+                );
+            }
+
+            // Divide este rectángulo en cuatro cuadrantes
+            dividir() {
+                const mitadW = this.w / 2;
+                const mitadH = this.h / 2;
+                const noreste = new Rectangulo(this.x + mitadW, this.y, mitadW, mitadH);
+                const noroeste = new Rectangulo(this.x, this.y, mitadW, mitadH);
+                const sureste = new Rectangulo(this.x + mitadW, this.y + mitadH, mitadW, mitadH);
+                const suroeste = new Rectangulo(this.x, this.y + mitadH, mitadW, mitadH);
+                return [noreste, noroeste, sureste, suroeste];
+            }
+        }
+
+        // Clase QuadTree para representar la estructura del Quad Tree
+        class QuadTree {
+            constructor(imagen, umbral, limite) {
+                this.imagen = imagen;
+                this.umbral = umbral;
+                this.limite = limite;
+                this.rectangulo = new Rectangulo(0, 0, imagen.width, imagen.height);
+                this.color = this.calcularColorPromedio(this.rectangulo);
+                this.dividido = false;
+                this.quadrantes = [];
+            }
+
+            // Función para calcular el color promedio de una región
+            calcularColorPromedio(rect) {
+                const ctx = this.imagen.getContext('2d');
+                const imageData = ctx.getImageData(rect.x, rect.y, rect.w, rect.h);
+                const data = imageData.data;
+                let sumR = 0, sumG = 0, sumB = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    sumR += data[i]; // canal rojo
+                    sumG += data[i + 1]; // canal verde
+                    sumB += data[i + 2]; // canal azul
+                }
+                const numPixeles = rect.w * rect.h;
+                const promedioR = sumR / numPixeles;
+                const promedioG = sumG / numPixeles;
+                const promedioB = sumB / numPixeles;
+                return { r: promedioR, g: promedioG, b: promedioB };
+            }
+
+            // Inserta la imagen en los cuadrantes correspondientes
+            insertar() {
+                if (this.esHomogeneo() || this.rectangulo.w <= this.limite || this.rectangulo.h <= this.limite) {
+                    // Es homogéneo o llegamos al límite de división
+                    this.dividido = false;
+                    return;
+                }
+
+                const cuadrantes = this.rectangulo.dividir();
+                for (let cuadrante of cuadrantes) {
+                    const qt = new QuadTree(this.imagen, this.umbral, this.limite);
+                    qt.rectangulo = cuadrante;
+                    qt.color = qt.calcularColorPromedio(cuadrante);
+                    qt.insertar();
+                    this.quadrantes.push(qt);
+                }
+
+                this.dividido = true;
+            }
+
+            // Verifica si el cuadrante actual es homogéneo
+            esHomogeneo() {
+                const ctx = this.imagen.getContext('2d');
+                const imageData = ctx.getImageData(this.rectangulo.x, this.rectangulo.y, this.rectangulo.w, this.rectangulo.h);
+                const data = imageData.data;
+                const promedioR = this.color.r;
+                const promedioG = this.color.g;
+                const promedioB = this.color.b;
+                const umbral = this.umbral;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    const diferencia = Math.abs(data[i] - promedioR) +
+                                       Math.abs(data[i + 1] - promedioG) +
+                                       Math.abs(data[i + 2] - promedioB);
+
+                    if (diferencia > umbral) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            // Dibuja la estructura del Quad Tree en un contexto de lienzo
+            dibujar(ctx) {
+                ctx.strokeStyle = 'black';
+                ctx.strokeRect(this.rectangulo.x, this.rectangulo.y, this.rectangulo.w, this.rectangulo.h);
+
+                if (this.dividido) {
+                    for (let qt of this.quadrantes) {
+                        qt.dibujar(ctx);
+                    }
+                } else {
+                    ctx.fillStyle = `rgb(${Math.round(this.color.r)}, ${Math.round(this.color.g)}, ${Math.round(this.color.b)})`;
+                    ctx.fillRect(this.rectangulo.x, this.rectangulo.y, this.rectangulo.w, this.rectangulo.h);
+                }
+            }
+        }
+
+        // Función principal para configurar la demostración
+        function configurar() {
+            const canvas = document.getElementById('imageCanvas');
+            const ctx = canvas.getContext('2d');
+            const fileInput = document.getElementById('fileInput');
+
+            fileInput.addEventListener('change', function(event) {
+                const file = event.target.files[0];
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    const imagen = new Image();
+                    imagen.onload = function() {
+                        canvas.width = imagen.width;
+                        canvas.height = imagen.height;
+                        ctx.drawImage(imagen, 0, 0);
+    
+                        // Convertir la imagen a escala de grises
+                        const imagenGrises = imagenAGrises(imagen);
+    
+                        // Construir el Quad Tree y visualizar
+                        const umbral = 30; // Umbral para determinar la homogeneidad (ajustar según sea necesario)
+                        const limite = 8; // Límite mínimo de tamaño de cuadrante
+                        const quadTree = new QuadTree(imagenGrises, umbral, limite);
+                        quadTree.insertar();
+                        quadTree.dibujar(ctx);
+                    };
+                    imagen.src = e.target.result;
+                };
+
+                reader.readAsDataURL(file);
+            });
+        }
+
+        configurar();
+    </script>
+</body>
+</html>
